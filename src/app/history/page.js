@@ -5,16 +5,10 @@ import { formatDate, formatCurrency } from "@/lib/utils";
 import {
   ArrowLeft,
   Search,
-  Filter,
   Zap,
   Clock,
   Wallet,
-  Home,
-  PieChart,
-  History,
-  Settings,
   CalendarDays,
-  Plus,
   ArrowUpRight,
   ArrowDownRight,
   Fuel,
@@ -41,6 +35,7 @@ const getTransactionIcon = (type, category) => {
 export default function HistoryPage() {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState(""); 
   const router = useRouter();
 
   useEffect(() => {
@@ -59,36 +54,40 @@ export default function HistoryPage() {
       .catch(() => setLoading(false));
   }, [router]);
 
-  // Logic to calculate running balances and group by day
   const dailyLedger = useMemo(() => {
     if (!transactions.length) return {};
 
-    // 1. Sort oldest to newest to calculate running balance accurately
-    const sortedOldest = [...transactions].sort(
+    // 1. Filter based on search query
+    const filtered = transactions.filter((tx) =>
+      tx.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (tx.category && tx.category.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+
+    // 2. Sort oldest to newest for balance calculation
+    const sortedOldest = [...filtered].sort(
       (a, b) => new Date(a.timestamp) - new Date(b.timestamp),
     );
 
     let runningBalance = 0;
-    const ledgerWithBalance = sortedOldest.map((tx, index) => {
+    const ledgerWithBalance = sortedOldest.map((tx) => {
       const amt = Number(tx.amount) || 0;
-
-      // LOGIC FIX: For the very first "INITIAL" entry, opening and closing should match
-      // the initial amount to show the starting point of the vault.
       let openingBalance = runningBalance;
 
       if (tx.type === "INITIAL") {
-        runningBalance = amt;
-        openingBalance = amt; // Opening for the first day is the initial deposit
+        runningBalance = amt; // Corrected variable name
+        openingBalance = amt;
       } else if (tx.type === "RECEIVED") {
         runningBalance += amt;
-      } else {
+      } else if (tx.type === "SPEND" || tx.type === "LENT") {
         runningBalance -= amt;
       }
+      // Note: IPO_HOLD doesn't affect runningBankBalance in your system 
+      // until Allotted, so we leave it out of the calculation here.
 
       return { ...tx, opening: openingBalance, closing: runningBalance };
     });
 
-    // 2. Group by date (Newest day first)
+    // 3. Group by date (Newest day first)
     const groups = {};
     [...ledgerWithBalance].reverse().forEach((tx) => {
       const date = new Date(tx.timestamp).toLocaleDateString("en-IN", {
@@ -100,17 +99,15 @@ export default function HistoryPage() {
       groups[date].items.push(tx);
     });
 
-    // 3. Set Opening/Closing for the day
+    // 4. Set Opening/Closing totals for the day
     Object.keys(groups).forEach((date) => {
       const items = groups[date].items;
-      // Day Opening = the opening balance of the earliest entry of that day (last in reversed list)
       groups[date].opening = items[items.length - 1].opening;
-      // Day Closing = the final balance after the last entry of that day (first in reversed list)
       groups[date].closing = items[0].closing;
     });
 
     return groups;
-  }, [transactions]);
+  }, [transactions, searchQuery]);
 
   if (loading)
     return (
@@ -151,13 +148,15 @@ export default function HistoryPage() {
           />
           <input
             type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search archive..."
             className="w-full bg-slate-100/50 border-transparent rounded-2xl py-4 pl-12 pr-4 text-sm font-semibold focus:bg-white focus:ring-4 focus:ring-blue-50 outline-none transition-all placeholder:text-slate-400"
           />
         </div>
       </header>
 
-      {transactions.length > 0 ? (
+      {Object.keys(dailyLedger).length > 0 ? (
         <section className="px-6 py-8">
           {Object.entries(dailyLedger).map(([date, data]) => (
             <div key={date} className="mb-14">
@@ -168,14 +167,11 @@ export default function HistoryPage() {
                 <div className="h-[1px] flex-1 bg-gradient-to-r from-slate-100 to-transparent" />
               </div>
 
-              {/* Day Balance Summary Box */}
               <div className="grid grid-cols-2 gap-3 mb-6">
                 <div className="bg-white border border-slate-100 p-5 rounded-[2rem] shadow-sm">
                   <div className="flex items-center gap-2 mb-1.5 opacity-40">
                     <ArrowUpRight size={12} className="text-emerald-500" />
-                    <span className="text-[8px] font-black uppercase tracking-widest">
-                      Opening
-                    </span>
+                    <span className="text-[8px] font-black uppercase tracking-widest">Opening</span>
                   </div>
                   <p className="text-[15px] font-black text-slate-900">
                     {formatCurrency(data.opening)}
@@ -184,9 +180,7 @@ export default function HistoryPage() {
                 <div className="bg-slate-900 p-5 rounded-[2rem] shadow-xl shadow-slate-100">
                   <div className="flex items-center gap-2 mb-1.5 opacity-60">
                     <ArrowDownRight size={12} className="text-blue-400" />
-                    <span className="text-[8px] font-black uppercase tracking-widest text-white">
-                      Closing
-                    </span>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-white">Closing</span>
                   </div>
                   <p className="text-[15px] font-black text-white">
                     {formatCurrency(data.closing)}
@@ -195,7 +189,7 @@ export default function HistoryPage() {
               </div>
 
               <div className="space-y-4">
-                {data.items.map((tx, i) => (
+                {data.items.map((tx) => (
                   <motion.div
                     key={tx._id}
                     initial={{ opacity: 0, y: 10 }}
@@ -210,28 +204,19 @@ export default function HistoryPage() {
                           {getTransactionIcon(tx.type, tx.category)}
                         </div>
                         <div>
-                          <h4 className="font-extrabold text-[15px] text-slate-900 line-clamp-1">
-                            {tx.name}
-                          </h4>
+                          <h4 className="font-extrabold text-[15px] text-slate-900 line-clamp-1">{tx.name}</h4>
                           <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mt-0.5">
-                            {tx.category || "Vault"}
+                            {tx.type === "IPO_HOLD" ? "IPO Hold" : (tx.category || "Vault")}
                           </p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p
-                          className={`text-base font-black tracking-tight ${tx.type === "RECEIVED" || tx.type === "INITIAL" ? "text-emerald-500" : "text-red-400"}`}
-                        >
-                          {tx.type === "RECEIVED" || tx.type === "INITIAL"
-                            ? "+"
-                            : "−"}
-                          {formatCurrency(tx.amount).replace("₹", "")}
+                        <p className={`text-base font-black tracking-tight ${tx.type === "RECEIVED" || tx.type === "INITIAL" ? "text-emerald-500" : tx.type === "IPO_HOLD" ? "text-orange-400" : "text-red-400"}`}>
+                          {tx.type === "RECEIVED" || tx.type === "INITIAL" ? "+  " : tx.type === "IPO_HOLD" ? "" : "−  "}
+                          ₹{formatCurrency(tx.amount).replace("₹", "")}
                         </p>
-                        <p className="text-[9px] font-extrabold text-slate-300 uppercase tracking-widest mt-0.5">
-                          {new Date(tx.timestamp).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                        <p className="text-[9px] font-extrabold text-slate-300 uppercase mt-0.5">
+                          {new Date(tx.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </p>
                       </div>
                     </div>
@@ -247,47 +232,10 @@ export default function HistoryPage() {
             <CalendarDays size={48} strokeWidth={1.5} />
           </div>
           <h2 className="text-2xl font-black tracking-tight text-slate-900 uppercase">
-            Vault Empty
+            {searchQuery ? "No Matches Found" : "Vault Empty"}
           </h2>
         </section>
       )}
-
-      {/* Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-50 px-10 py-5 pb-10 z-[90] flex justify-between items-center shadow-2xl">
-        <button
-          onClick={() => router.push("/dashboard")}
-          className="flex flex-col items-center gap-1.5 text-slate-400 outline-none"
-        >
-          <Home size={26} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-tighter">
-            Vault
-          </span>
-        </button>
-        <button
-          onClick={() => router.push("/insights")}
-          className="flex flex-col items-center gap-1.5 text-slate-400 outline-none"
-        >
-          <PieChart size={26} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-tighter">
-            Insights
-          </span>
-        </button>
-        <button className="flex flex-col items-center gap-1.5 text-blue-600 outline-none">
-          <History size={26} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-tighter">
-            Archive
-          </span>
-        </button>
-        <button
-          onClick={() => router.push("/settings")}
-          className="flex flex-col items-center gap-1.5 text-slate-400 outline-none"
-        >
-          <Settings size={26} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-tighter">
-            Vault ID
-          </span>
-        </button>
-      </nav>
     </div>
   );
 }

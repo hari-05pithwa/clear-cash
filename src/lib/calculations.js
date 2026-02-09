@@ -44,6 +44,72 @@
  * Robust Calculator for ClearCash
  * Builds current state by summing all transactions to prevent "undefined" errors.
  */
+
+
+
+// og
+// export const calculateTotals = (transactions) => {
+//   let totals = {
+//     bankBalance: 0,
+//     safeToSpend: 0,
+//     totalLocked: 0, 
+//     totalLent: 0,   
+//     categoryWise: {},
+//   };
+
+//   if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
+//     return totals;
+//   }
+
+//   // 1. Sort by date (oldest first) to accurately build the running balance
+//   const sortedHistory = [...transactions].sort((a, b) => 
+//     new Date(a.timestamp) - new Date(b.timestamp)
+//   );
+
+//   let runningBalance = 0;
+
+//   sortedHistory.forEach((tx) => {
+//     const amount = Number(tx.amount) || 0;
+
+//     // 2. Logic to build the balance based on transaction type
+//     if (tx.type === "INITIAL" || tx.type === "RECEIVED") {
+//       runningBalance += amount;
+//     } else if (tx.type === "SPEND" || tx.type === "IPO_HOLD" || tx.type === "LENT") {
+//       runningBalance -= amount;
+//     }
+
+//     // 3. Accumulate stats for the Bento Grid
+//     if (tx.type === "IPO_HOLD") {
+//       totals.totalLocked += amount;
+//     }
+//     if (tx.type === "LENT") {
+//       totals.totalLent += amount;
+//     }
+//     if (tx.type === "SPEND") {
+//       const cat = tx.category || "General";
+//       totals.categoryWise[cat] = (totals.categoryWise[cat] || 0) + amount;
+//     }
+//   });
+
+//   // Final mapping for the Hero Cards
+//   totals.bankBalance = runningBalance;
+//   totals.safeToSpend = runningBalance; // You can subtract totalLocked here if you want it to reflect true spending power
+
+//   return totals;
+// };
+
+
+
+
+
+
+
+
+
+
+
+
+// ai
 export const calculateTotals = (transactions) => {
   let totals = {
     bankBalance: 0,
@@ -57,39 +123,38 @@ export const calculateTotals = (transactions) => {
     return totals;
   }
 
-  // 1. Sort by date (oldest first) to accurately build the running balance
-  const sortedHistory = [...transactions].sort((a, b) => 
-    new Date(a.timestamp) - new Date(b.timestamp)
-  );
+  let runningBankBalance = 0;
+  let totalIpoHold = 0;
 
-  let runningBalance = 0;
-
-  sortedHistory.forEach((tx) => {
+  transactions.forEach((tx) => {
     const amount = Number(tx.amount) || 0;
 
-    // 2. Logic to build the balance based on transaction type
+    // Bank Balance: Only actual Income and actual Spent
     if (tx.type === "INITIAL" || tx.type === "RECEIVED") {
-      runningBalance += amount;
-    } else if (tx.type === "SPEND" || tx.type === "IPO_HOLD" || tx.type === "LENT") {
-      runningBalance -= amount;
-    }
-
-    // 3. Accumulate stats for the Bento Grid
-    if (tx.type === "IPO_HOLD") {
-      totals.totalLocked += amount;
-    }
-    if (tx.type === "LENT") {
-      totals.totalLent += amount;
-    }
-    if (tx.type === "SPEND") {
+      runningBankBalance += amount;
+    } else if (tx.type === "SPEND") {
+      runningBankBalance -= amount;
+      // Category stats for the bento grid
       const cat = tx.category || "General";
       totals.categoryWise[cat] = (totals.categoryWise[cat] || 0) + amount;
+    } 
+    
+    // IPO Logic: Tracks blocked money (Does NOT reduce Bank Balance yet)
+    else if (tx.type === "IPO_HOLD") {
+      totalIpoHold += amount;
+      totals.totalLocked += amount;
+    }
+    
+    // Lent Logic: Physical cash leaving the bank
+    else if (tx.type === "LENT") {
+      runningBankBalance -= amount; 
+      totals.totalLent += amount;
     }
   });
 
-  // Final mapping for the Hero Cards
-  totals.bankBalance = runningBalance;
-  totals.safeToSpend = runningBalance; // You can subtract totalLocked here if you want it to reflect true spending power
+  totals.bankBalance = runningBankBalance;
+  // Safe to Spend = Actual money in bank - Money blocked for IPOs
+  totals.safeToSpend = runningBankBalance - totalIpoHold;
 
   return totals;
 };
